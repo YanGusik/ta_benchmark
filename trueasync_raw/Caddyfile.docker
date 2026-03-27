@@ -1,0 +1,20 @@
+{
+	admin off
+	frankenphp {
+	}
+}
+
+:8085 {
+	root * /app
+	php_server {
+		index off
+		file_server off
+		worker {
+			file /app/entrypoint.php
+			num 4
+			async
+			buffer_size 1
+			match /*
+		}
+	}
+}
