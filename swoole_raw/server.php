@@ -1,9 +1,12 @@
 <?php
 
+$workers = (int)($argv[1] ?? swoole_cpu_num());
+
 $server = new Swoole\Http\Server('0.0.0.0', 8086);
 
 $server->set([
-    'worker_num' => 4,
+    'worker_num' => $workers,
+    'reactor_num' => swoole_cpu_num(),
     'enable_coroutine' => true,
 ]);
 
@@ -17,5 +20,5 @@ $server->on('request', function (Swoole\Http\Request $request, Swoole\Http\Respo
     ]));
 });
 
-echo "Swoole HTTP server started on 0.0.0.0:8086 (4 workers, coroutines enabled)\n";
+echo "Swoole HTTP server on 0.0.0.0:8086 (workers={$workers}, reactors=" . swoole_cpu_num() . ", ZTS=" . (PHP_ZTS ? 'yes' : 'no') . ")\n";
 $server->start();
