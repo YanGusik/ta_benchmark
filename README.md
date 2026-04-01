@@ -12,12 +12,12 @@ Benchmark comparing different Laravel server adapters under load using [k6](http
 
 ## Routes tested
 
-| Route | Description |
-|---|---|
-| `GET /hello` | Pure JSON response, no DB |
-| `GET /test` | One DB query (`SELECT pg_sleep(0.01)`, simulates 10ms DB latency) |
+| Route | Description                                                                            |
+|---|----------------------------------------------------------------------------------------|
+| `GET /hello` | Pure JSON response, no DB                                                              |
+| `GET /test` | One DB query (`SELECT pg_sleep(0.01)`, simulates 10ms DB latency)                      |
 | `GET /bench` | 5 DB queries: SELECT user, SELECT posts, INSERT view, UPDATE counter, SELECT aggregate |
-| `GET /debug/connections` | Live PostgreSQL connection stats (active, idle, total vs max) — TrueAsync only |
+| `GET /debug/connections` | Live PostgreSQL connection stats (active, idle, total vs max) — TrueAsync, Swoole only |
 
 ---
 
