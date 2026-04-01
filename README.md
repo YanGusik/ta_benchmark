@@ -8,12 +8,16 @@ Benchmark comparing different Laravel server adapters under load using [k6](http
 |---|---|---|---|
 | PHP-FPM + nginx | 8082 | 12 | `php:8.4-fpm-alpine` + `nginx:alpine` |
 | Octane Swoole | 8084 | 12 | `phpswoole/swoole:5.1-php8.3-alpine` |
-| TrueAsync FrankenPHP | 8083 | WIP | `trueasync/php-true-async:latest-frankenphp` |
+| TrueAsync FrankenPHP | 8083 | 12 | `trueasync/php-true-async:latest-frankenphp` |
 
 ## Routes tested
 
-- `GET /hello` — pure JSON response, no DB
-- `GET /test` — one DB query (`SELECT pg_sleep(0.01)`, simulates 10ms DB work)
+| Route | Description |
+|---|---|
+| `GET /hello` | Pure JSON response, no DB |
+| `GET /test` | One DB query (`SELECT pg_sleep(0.01)`, simulates 10ms DB latency) |
+| `GET /bench` | 5 DB queries: SELECT user, SELECT posts, INSERT view, UPDATE counter, SELECT aggregate |
+| `GET /debug/connections` | Live PostgreSQL connection stats (active, idle, total vs max) — TrueAsync only |
 
 ---
 
@@ -24,45 +28,125 @@ Benchmark comparing different Laravel server adapters under load using [k6](http
 - Docker + Docker Compose
 - [k6](https://k6.io/docs/get-started/installation/)
 
+### Clone
+
+```bash
+git clone https://github.com/YanGusik/ta_benchmark.git
+cd ta_benchmark
+```
+
+---
+
 ### PHP-FPM
 
 ```bash
 cd fpm
-docker compose up -d --build
+
+# 1. Build the image, then install dependencies before starting
+#    (the container crashes on startup if vendor/ is missing)
+docker compose build
+docker compose run --rm php composer install --ignore-platform-reqs
+
+# 2. Start services
+docker compose up -d
+
+# 3. First-time setup
 docker compose exec php chmod -R 777 /app/storage /app/bootstrap/cache
 docker compose exec php php artisan key:generate
 docker compose exec php php artisan migrate
+docker compose exec php php artisan db:seed --class=BenchmarkSeeder
 curl http://localhost:8082/hello
 ```
+
+---
 
 ### Octane Swoole
 
 ```bash
 cd octane_swoole
-docker compose up -d --build
+
+# 1. Build the image, then install dependencies before starting
+docker compose build
+docker compose run --rm app composer install --ignore-platform-reqs
+
+# 2. Start services
+docker compose up -d
+
+# 3. First-time setup
 docker compose exec app chmod -R 777 /app/storage /app/bootstrap/cache
 docker compose exec app php artisan key:generate
 docker compose exec app php artisan migrate
+docker compose exec app php artisan db:seed --class=BenchmarkSeeder
 curl http://localhost:8084/hello
 ```
 
-### TrueAsync
+---
 
-> ⚠️ Currently unstable — pending bug fix in TrueAsync fork.
+### TrueAsync FrankenPHP
+
+TrueAsync uses a custom PHP extension for coroutines and requires **PHP 8.6** (only available inside the Docker image — not a standard PHP release).
+The package [`yangusik/laravel-spawn`](https://github.com/YanGusik/laravel-spawn) is pulled from a VCS repository.
+Use `--ignore-platform-reqs` so Composer doesn't reject the PHP 8.6 requirement on your local machine.
 
 ```bash
 cd trueasync
+
+# 1. Install dependencies before starting
+#    (uses pre-built image — no build step needed)
+docker compose run --rm app composer install --ignore-platform-reqs
+
+# 2. Start the server
 docker compose up -d
+
+# 3. First-time setup
 docker compose exec app chmod -R 777 /app/storage /app/bootstrap/cache
 docker compose exec app php artisan key:generate
 docker compose exec app php artisan migrate
-docker compose restart app
+docker compose exec app php artisan db:seed --class=BenchmarkSeeder
+docker compose exec app php artisan vendor:publish --tag=async-config
+
 curl http://localhost:8083/hello
+```
+
+#### Updating the adapter
+
+When [`yangusik/laravel-spawn`](https://github.com/YanGusik/laravel-spawn) is updated, pull the latest version:
+
+```bash
+cd trueasync
+docker compose run --rm app composer update yangusik/laravel-spawn --ignore-platform-reqs
+docker compose restart app
+```
+
+#### DB connection pool
+
+TrueAsync uses a coroutine-aware PDO pool. The pool size is configured in `config/async.php`
+(publish with `php artisan vendor:publish --tag=async-config`):
+
+```php
+'db_pool' => [
+    'enabled' => true,
+    'min'     => 2,
+    'max'     => 10,   // per worker — 12 workers × 10 = 120 max connections total
+    'healthcheck_interval' => 30,
+],
+```
+
+PostgreSQL `max_connections` is set to **500** in `compose.yml` to accommodate the pool.
+Monitor live connections during load:
+
+```bash
+curl -s http://localhost:8083/debug/connections | jq .
+
+# Or watch during k6 run
+watch -n1 'curl -s http://localhost:8083/debug/connections | jq "{total,max_connections,by_state}"'
 ```
 
 ---
 
 ## Running benchmarks
+
+All scripts use the same load: **840 hello req/s + 360 DB req/s = 1200 req/s total**.
 
 ```bash
 # PHP-FPM
@@ -71,55 +155,56 @@ k6 run k6/fpm.js
 # Octane Swoole
 k6 run k6/octane_swoole.js
 
-# TrueAsync (when stable)
+# TrueAsync
 k6 run k6/trueasync.js
+
+# /bench endpoint (5 DB queries per request), target adapter via BASE_URL
+BASE_URL=http://localhost:8083 k6 run k6/bench.js
+BASE_URL=http://localhost:8084 k6 run k6/bench.js
+BASE_URL=http://localhost:8082 k6 run k6/bench.js
 ```
 
 ---
 
 ## Results
 
-Load: 350 req/s `/hello` + 150 req/s `/test` = **500 req/s total** via k6 `constant-arrival-rate`, 30s duration.
+Load: **840 req/s `/hello` + 360 req/s `/test` = 1200 req/s total**, `constant-arrival-rate`, 30s duration.
+All adapters: **12 workers**. Environment: WSL2 (Linux 6.6 on Windows).
 
-### PHP-FPM (12 workers) vs Octane Swoole (12 workers)
-
-| Metric | PHP-FPM (12w) | Octane Swoole (12w) |
-|---|---|---|
-| Target rate | 500 req/s | 500 req/s |
-| Actual throughput | 200 req/s | **500 req/s** |
-| Dropped iterations | 7,937 | **7** |
-| avg latency | 4,000ms | **30ms** |
-| median latency | 4,570ms | **19ms** |
-| p(90) latency | 4,920ms | **47ms** |
-| p(95) latency | 4,970ms | **112ms** |
-| Failed requests | 0% | 0% |
-
-> PHP-FPM collapses under 500 req/s even with 12 workers — requests pile up in queue causing 4+ second latency. Octane Swoole handles the full load with zero errors.
-
-### TrueAsync FrankenPHP — preliminary result (1 worker, buffer=1)
-
-Tested separately at **300 req/s** (multi-worker mode temporarily unavailable):
-
-| Metric | TrueAsync (1 worker) | PHP-FPM (12w) @ 300 req/s |
-|---|---|---|
-| Actual throughput | **300 req/s** | 200 req/s |
-| avg latency | **5.52ms** | ~4,000ms |
-| p(95) latency | **14.68ms** | ~5,000ms |
-| Dropped iterations | **0** | 7,937 |
-
-> 1 TrueAsync worker outperforms 12 FPM workers. Full multi-worker benchmark pending bug fix.
+| Metric | PHP-FPM (12w) | Octane Swoole (12w) | TrueAsync (12w) |
+|---|---|---|---|
+| Target rate | 1200 req/s | 1200 req/s | 1200 req/s |
+| Actual throughput | ~200 req/s | ~752 req/s | **~1118 req/s** |
+| Dropped iterations | ~28 000 | ~5 000 | **20** |
+| avg latency | ~4 000ms | ~880ms | **13ms** |
+| p(95) latency | ~5 000ms | 2 320ms | **21ms** |
+| p(95) < 200ms | ✗ | ✗ | **✓** |
+| Failed requests | 0% | 0% | **0%** |
+| DB connections (peak) | — | — | 120 |
 
 ---
 
-## Known issues
+## Architecture comparison
 
-- **TrueAsync**: `Async\AsyncException: Failed to monitor process` when using `--workers > 1` or `--buffer > 1` — bug in TrueAsync fork, pending fix from [@EdmondDantes](https://github.com/EdmondDantes)
+| | PHP-FPM | Octane Swoole | TrueAsync |
+|---|---|---|---|
+| Request model | Process per request | 1 process = 1 request at a time | 1 worker = N coroutines |
+| DB I/O | Blocking (new conn each req) | Blocking (PDO synchronous) | **Non-blocking (coroutine yield)** |
+| Memory model | Stateless | Long-lived process | Long-lived process + coroutine context isolation |
+| App bootstrap | Every request | Once per worker | Once per worker |
+
+**Why TrueAsync wins on DB-bound load:**
+Swoole keeps the app in memory (avoids bootstrap cost) but PDO is still synchronous —
+a worker blocked on `pg_sleep(0.01)` cannot accept another request.
+TrueAsync yields the coroutine on every DB call, so one worker handles hundreds of
+concurrent DB-bound requests without blocking.
 
 ---
 
 ## Notes
 
-- Each adapter has its own PostgreSQL instance on a different port to avoid conflicts
+- Each adapter has its own PostgreSQL instance on a separate port to avoid interference
 - `APP_DEBUG=false` in all setups for fair comparison
 - OPcache enabled in PHP-FPM
-- Swoole workers = PHP processes (not coroutines)
+- PostgreSQL `max_connections=500` in all setups
+- Absolute numbers will be higher on bare metal (benchmarks run on WSL2)

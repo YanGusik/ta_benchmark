@@ -24,6 +24,7 @@ services:
 
   db:
     image: postgres:16-alpine
+    command: postgres -c max_connections=500
     environment:
       POSTGRES_DB: laravel
       POSTGRES_USER: laravel

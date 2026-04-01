@@ -6,6 +6,41 @@ Route::get('/', function () {
     return view('welcome');
 });
 
+
+Route::get('/debug/connections', function () {
+    // Total connections grouped by state
+    $byState = DB::select("
+        SELECT state, count(*) as cnt
+        FROM pg_stat_activity
+        WHERE datname = current_database()
+        GROUP BY state
+        ORDER BY cnt DESC
+    ");
+
+    // Per-application (client_addr) breakdown — useful to confirm connections from this app
+    $byClient = DB::select("
+        SELECT client_addr, state, count(*) as cnt
+        FROM pg_stat_activity
+        WHERE datname = current_database()
+        GROUP BY client_addr, state
+        ORDER BY cnt DESC
+        LIMIT 20
+    ");
+
+    // PostgreSQL server limit
+    $limit = DB::selectOne("SELECT current_setting('max_connections')::int AS max_connections");
+
+    $total = array_sum(array_column($byState, 'cnt'));
+
+    return response()->json([
+        'max_connections' => $limit->max_connections,
+        'total'           => $total,
+        'by_state'        => $byState,
+        'by_client'       => $byClient,
+        'time'            => now()->toIso8601String(),
+    ]);
+});
+
 Route::get('/hello', fn() => response()->json([
     'message' => 'Hello from Octane Swoole!',
     'time'    => now()->toIso8601String(),

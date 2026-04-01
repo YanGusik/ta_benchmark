@@ -7,7 +7,7 @@ export const options = {
     scenarios: {
         hello_rps: {
             executor: 'constant-arrival-rate',
-            rate: 700,
+            rate: 840,
             timeUnit: '1s',
             duration: '30s',
             preAllocatedVUs: 100,
@@ -17,7 +17,7 @@ export const options = {
         },
         test_rps: {
             executor: 'constant-arrival-rate',
-            rate: 300,
+            rate: 360,
             timeUnit: '1s',
             duration: '30s',
             preAllocatedVUs: 100,
