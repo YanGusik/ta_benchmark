@@ -1,0 +1,11 @@
+{
+	admin off
+	frankenphp {
+		num_threads 4
+	}
+}
+
+:8080 {
+	root * /app/public
+	php_server
+}

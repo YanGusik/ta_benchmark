@@ -1,9 +1,10 @@
 services:
 
   app:
-    image: trueasync/php-true-async:latest-frankenphp
+    build:
+      context: ./docker
     working_dir: /app
-    command: php artisan async:franken --host=0.0.0.0 --port=8080 --workers=12 --buffer=1
+    command: php artisan async:franken --host=0.0.0.0 --port=8080 --workers=4 --buffer=50
     ports:
       - "8083:8080"
     volumes:

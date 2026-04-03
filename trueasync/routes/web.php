@@ -78,10 +78,45 @@ Route::get('/bench', function () {
         [$postId]
     );
 
+    // 6. SELECT top 5 most viewed posts
+    $topPosts = DB::select(
+        'SELECT id, title, views_count FROM posts ORDER BY views_count DESC LIMIT 5'
+    );
+
+    // 7. SELECT count of posts per user (leaderboard)
+    $leaderboard = DB::select(
+        'SELECT user_id, COUNT(*) as post_count FROM posts GROUP BY user_id ORDER BY post_count DESC LIMIT 5'
+    );
+
+    // 8. SELECT another user's profile (simulate "related users")
+    $otherUserId = ($userId % 100) + 1;
+    $otherUser = DB::selectOne('SELECT id, name, email FROM users WHERE id = ?', [$otherUserId]);
+
+    // 9. SELECT posts by the other user
+    $otherPosts = DB::select(
+        'SELECT id, title FROM posts WHERE user_id = ? LIMIT 5',
+        [$otherUserId]
+    );
+
+    // 10. SELECT recent post_views across all posts
+    $recentViews = DB::select(
+        'SELECT post_id, ip_address, viewed_at FROM post_views ORDER BY viewed_at DESC LIMIT 10'
+    );
+
     return response()->json([
         'user' => $user->name,
         'posts' => count($posts),
         'views' => $stats->total_views,
+        'top_posts' => count($topPosts),
+        'leaderboard' => count($leaderboard),
+        'other_user' => $otherUser->name,
+        'other_posts' => count($otherPosts),
+        'recent_views' => count($recentViews),
+        'queries' => 10,
+        'memory_usage' => memory_get_usage(),
+        'memory_usage_real' => memory_get_usage(true),
+        'memory_peak' => memory_get_peak_usage(),
+        'memory_peak_real' => memory_get_peak_usage(true),
         'time' => now()->toIso8601String(),
     ]);
 });
