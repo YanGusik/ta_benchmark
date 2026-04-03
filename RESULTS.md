@@ -53,6 +53,22 @@ Each request executes **10 SQL queries** against PostgreSQL:
 
 ---
 
+## Charts
+
+### Throughput & Container Memory
+
+![Throughput and Memory](charts_throughput_memory.png)
+
+### Median Latency (log scale)
+
+![Latency](charts_latency.png)
+
+### PHP Userland Memory Per Worker
+
+![PHP Memory](charts_php_memory.png)
+
+---
+
 ## Results: Throughput (req/s)
 
 | Workers | TrueAsync | Swoole NTS | Swoole ZTS | FrankenPHP Octane |
