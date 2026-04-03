@@ -172,6 +172,32 @@ This is expected because Swoole's thread mode (6.2) still runs each worker as a 
 
 The bottleneck is not process creation overhead or context switching — it's **I/O wait**. Each worker spends ~95% of its time blocked in `PDO::query()` → `poll()`/`epoll_wait()` waiting for PostgreSQL. Threads and processes block identically on a file descriptor. The kernel scheduler treats both the same way. The only way to reclaim that idle time is to yield to another coroutine (what TrueAsync does) or to add more workers.
 
+### 2a. OPcache discovery: Swoole ran without OPcache
+
+During testing we discovered that **Swoole was running without OPcache** in all initial tests. Swoole uses the `cli` SAPI, and `opcache.enable_cli` defaults to `Off`. TrueAsync and FrankenPHP Octane use the `frankenphp` SAPI where `opcache.enable=On` takes effect.
+
+After enabling `opcache.enable_cli=1` for Swoole, we re-ran all tests **with full 3-phase warmup** (10 sequential + 50 conn/10s + 200 conn/10s):
+
+| Workers | Without OPcache req/s | With OPcache req/s | Change | Without mem | With mem |
+|---------|----------------------|--------------------|--------|-------------|----------|
+| 4 | 185 | 162 | **-12%** | 512 MB | 471 MB |
+| 8 | 341 | 266 | **-22%** | 604 MB | 558 MB |
+| 12 | 476 | 397 | **-17%** | 687 MB | 643 MB |
+| 16 | 601 | 514 | **-14%** | 765 MB | 719 MB |
+
+**OPcache reduced memory by ~5-8% but decreased throughput by 12-22%.**
+
+This counterintuitive result is confirmed with full warmup (OPcache reports 62-65 cached scripts, 9.6 MB used). The throughput loss is real, not a warmup artifact.
+
+Why OPcache hurts Swoole:
+
+- In a **long-running worker** (Octane), PHP scripts are compiled **once at boot** and the compiled bytecode stays in the worker's memory for the entire process lifetime. OPcache is designed for short-lived request-per-process models (PHP-FPM) where it prevents recompilation on every request. In Octane, there is no recompilation to prevent.
+- With OPcache enabled, every `include`/`require` must first check the SHM cache (hash lookup + lock acquisition). In ZTS mode, this requires thread-safe access to shared memory — additional mutex contention on every opcode fetch.
+- The 9.6 MB SHM segment adds memory-mapped pages that the kernel must manage, while providing no benefit since the bytecode is already resident in worker memory.
+- PHP userland memory stayed at 20.6 MB regardless — OPcache doesn't reduce the heap used by Laravel's runtime objects (service container, config arrays, route table).
+
+**Conclusion:** OPcache is counterproductive for Swoole in long-running worker mode. All Swoole numbers in the main comparison tables use the faster configuration (without OPcache, `opcache.enable_cli=Off`).
+
 ### 3. Octane FrankenPHP ≈ Octane Swoole
 
 FrankenPHP via Octane and Swoole produce nearly identical throughput. Both are blocking servers with the same fundamental constraint: **1 request per worker at a time**.

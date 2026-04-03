@@ -121,3 +121,13 @@ Route::get('/bench', function () {
         'time' => now()->toIso8601String(),
     ]);
 });
+
+Route::get('/opcache-status', function () {
+    $status = opcache_get_status(false);
+    return response()->json([
+        'sapi' => php_sapi_name(),
+        'opcache_enabled' => $status['opcache_enabled'] ?? false,
+        'cached_scripts' => $status['opcache_statistics']['num_cached_scripts'] ?? 0,
+        'memory_used_mb' => round(($status['memory_usage']['used_memory'] ?? 0) / 1024 / 1024, 1),
+    ]);
+});
