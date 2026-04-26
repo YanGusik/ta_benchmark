@@ -1,23 +1,24 @@
 # ta_benchmark
 
-Benchmark comparing different Laravel server adapters under load using [k6](https://k6.io).
+Benchmark comparing different PHP server adapters under load using [k6](https://k6.io).
 
 ## Adapters
 
-| Adapter | Port | Workers | Image |
-|---|---|---|---|
-| PHP-FPM + nginx | 8082 | 12 | `php:8.4-fpm-alpine` + `nginx:alpine` |
-| Octane Swoole | 8084 | 12 | `phpswoole/swoole:5.1-php8.3-alpine` |
-| TrueAsync FrankenPHP | 8083 | 12 | `trueasync/php-true-async:latest-frankenphp` |
+| Adapter                              | Port | Workers | Image                                        |
+|--------------------------------------|------|---------|----------------------------------------------|
+| PHP-FPM + nginx                      | 8082 | 12      | `php:8.4-fpm-alpine` + `nginx:alpine`        |
+| Octane Swoole                        | 8084 | 12      | `phpswoole/swoole:5.1-php8.3-alpine`         |
+| laravel-spawn (TrueAsync FrankenPHP) | 8083 | 12      | `trueasync/php-true-async:latest-frankenphp` |
+| symfony-spawn (TrueAsync FrankenPHP) | 8085 | 12      | `trueasync/php-true-async:latest-frankenphp` |
 
 ## Routes tested
 
-| Route | Description                                                                            |
-|---|----------------------------------------------------------------------------------------|
-| `GET /hello` | Pure JSON response, no DB                                                              |
-| `GET /test` | One DB query (`SELECT pg_sleep(0.01)`, simulates 10ms DB latency)                      |
-| `GET /bench` | 5 DB queries: SELECT user, SELECT posts, INSERT view, UPDATE counter, SELECT aggregate |
-| `GET /debug/connections` | Live PostgreSQL connection stats (active, idle, total vs max) — TrueAsync, Swoole only |
+| Route                    | Description                                                                            |
+|--------------------------|----------------------------------------------------------------------------------------|
+| `GET /hello`             | Pure JSON response, no DB                                                              |
+| `GET /test`              | One DB query (`SELECT pg_sleep(0.01)`, simulates 10ms DB latency)                      |
+| `GET /bench`             | 5 DB queries: SELECT user, SELECT posts, INSERT view, UPDATE counter, SELECT aggregate |
+| `GET /debug/connections` | Live PostgreSQL connection stats (active, idle, total vs max) — TrueAsync only         |
 
 ---
 
@@ -82,14 +83,15 @@ curl http://localhost:8084/hello
 
 ---
 
-### TrueAsync FrankenPHP
+### laravel-spawn — TrueAsync FrankenPHP
 
-TrueAsync uses a custom PHP extension for coroutines and requires **PHP 8.6** (only available inside the Docker image — not a standard PHP release).
+laravel-spawn uses a custom PHP extension for coroutines and requires **PHP 8.6** (only available inside the Docker
+image — not a standard PHP release).
 The package [`yangusik/laravel-spawn`](https://github.com/YanGusik/laravel-spawn) is pulled from a VCS repository.
 Use `--ignore-platform-reqs` so Composer doesn't reject the PHP 8.6 requirement on your local machine.
 
 ```bash
-cd trueasync
+cd laravel-spawn
 
 # 1. Install dependencies before starting
 #    (uses pre-built image — no build step needed)
@@ -113,14 +115,14 @@ curl http://localhost:8083/hello
 When [`yangusik/laravel-spawn`](https://github.com/YanGusik/laravel-spawn) is updated, pull the latest version:
 
 ```bash
-cd trueasync
+cd laravel-spawn
 docker compose run --rm app composer update yangusik/laravel-spawn --ignore-platform-reqs
 docker compose restart app
 ```
 
 #### DB connection pool
 
-TrueAsync uses a coroutine-aware PDO pool. The pool size is configured in `config/async.php`
+laravel-spawn uses a coroutine-aware PDO pool. The pool size is configured in `config/async.php`
 (publish with `php artisan vendor:publish --tag=async-config`):
 
 ```php
@@ -144,6 +146,41 @@ watch -n1 'curl -s http://localhost:8083/debug/connections | jq "{total,max_conn
 
 ---
 
+### symfony-spawn — TrueAsync FrankenPHP
+
+symfony-spawn uses the same TrueAsync FrankenPHP image but with a Symfony application.
+The package [`yangusik/symfony-spawn`](https://github.com/YanGusik/symfony-spawn) is available on Packagist.
+Use `--ignore-platform-reqs` so Composer doesn't reject the PHP 8.6 requirement on your local machine.
+
+```bash
+cd symfony-spawn
+
+# 1. Install dependencies before starting
+#    (uses pre-built image — no build step needed)
+docker compose run --rm app composer install --ignore-platform-reqs
+
+# 2. Start the server
+docker compose up -d
+
+# 3. First-time setup
+docker compose exec app php bin/console doctrine:migrations:migrate --no-interaction
+docker compose exec app php bin/console app:seed
+
+curl http://localhost:8085/hello
+```
+
+#### Updating the adapter
+
+When [`yangusik/symfony-spawn`](https://github.com/YanGusik/symfony-spawn) is updated, pull the latest version:
+
+```bash
+cd symfony-spawn
+docker compose run --rm app composer update yangusik/symfony-spawn --ignore-platform-reqs
+docker compose restart app
+```
+
+---
+
 ## Running benchmarks
 
 All scripts use the same load: **840 hello req/s + 360 DB req/s = 1200 req/s total**.
@@ -155,11 +192,15 @@ k6 run k6/fpm.js
 # Octane Swoole
 k6 run k6/octane_swoole.js
 
-# TrueAsync
-k6 run k6/trueasync.js
+# laravel-spawn (TrueAsync FrankenPHP)
+k6 run k6/laravel_spawn.js
+
+# symfony-spawn (TrueAsync FrankenPHP)
+k6 run k6/symfony_spawn.js
 
 # /bench endpoint (5 DB queries per request), target adapter via BASE_URL
 BASE_URL=http://localhost:8083 k6 run k6/bench.js
+BASE_URL=http://localhost:8085 k6 run k6/bench.js
 BASE_URL=http://localhost:8084 k6 run k6/bench.js
 BASE_URL=http://localhost:8082 k6 run k6/bench.js
 ```
@@ -169,29 +210,31 @@ BASE_URL=http://localhost:8082 k6 run k6/bench.js
 ## Results
 
 Load: **840 req/s `/hello` + 360 req/s `/test` = 1200 req/s total**, `constant-arrival-rate`, 30s duration.
-All adapters: **12 workers**. Environment: WSL2 (Linux 6.6 on Windows).
+PHP-FPM and Octane Swoole: **12 workers**. laravel-spawn and symfony-spawn: **12 workers**.
+Environment: WSL2 (12 cores).
 
-| Metric | PHP-FPM (12w) | Octane Swoole (12w) | TrueAsync (12w) |
-|---|---|---|---|
-| Target rate | 1200 req/s | 1200 req/s | 1200 req/s |
-| Actual throughput | ~200 req/s | ~752 req/s | **~1118 req/s** |
-| Dropped iterations | ~28 000 | ~5 000 | **20** |
-| avg latency | ~4 000ms | ~880ms | **13ms** |
-| p(95) latency | ~5 000ms | 2 320ms | **21ms** |
-| p(95) < 200ms | ✗ | ✗ | **✓** |
-| Failed requests | 0% | 0% | **0%** |
-| DB connections (peak) | — | — | 120 |
+| Metric                | PHP-FPM (12w) | Octane Swoole (12w) | laravel-spawn (12w) | symfony-spawn (12w) |
+|-----------------------|---------------|---------------------|---------------------|---------------------|
+| Target rate           | 1200 req/s    | 1200 req/s          | 1200 req/s          | 1200 req/s          |
+| Actual throughput     | ~200 req/s    | ~752 req/s          | **~1186 req/s**     | **~1200 req/s**     |
+| Dropped iterations    | ~28 000       | ~5 000              | 405                 | **0**               |
+| avg latency           | ~4 000ms      | ~880ms              | ~20ms               | **~8ms**            |
+| p(95) latency         | ~5 000ms      | 2 320ms             | 34ms                | **11ms**            |
+| p(95) < 200ms         | ✗             | ✗                   | **✓**               | **✓**               |
+| Failed requests       | 0%            | 0%                  | **0%**              | **0%**              |
+| DB connections (peak) | —             | —                   | 120                 | 120                 |
 
 ---
 
 ## Architecture comparison
 
-| | PHP-FPM | Octane Swoole | TrueAsync |
-|---|---|---|---|
-| Request model | Process per request | 1 process = 1 request at a time | 1 worker = N coroutines |
-| DB I/O | Blocking (new conn each req) | Blocking (PDO synchronous) | **Non-blocking (coroutine yield)** |
-| Memory model | Stateless | Long-lived process | Long-lived process + coroutine context isolation |
-| App bootstrap | Every request | Once per worker | Once per worker |
+|               | PHP-FPM                      | Octane Swoole                   | laravel-spawn                                    | symfony-spawn                                    |
+|---------------|------------------------------|---------------------------------|--------------------------------------------------|--------------------------------------------------|
+| Framework     | Laravel                      | Laravel                         | Laravel                                          | Symfony                                          |
+| Request model | Process per request          | 1 process = 1 request at a time | 1 worker = N coroutines                          | 1 worker = N coroutines                          |
+| DB I/O        | Blocking (new conn each req) | Blocking (PDO synchronous)      | **Non-blocking (coroutine yield)**               | **Non-blocking (coroutine yield)**               |
+| Memory model  | Stateless                    | Long-lived process              | Long-lived process + coroutine context isolation | Long-lived process + coroutine context isolation |
+| App bootstrap | Every request                | Once per worker                 | Once per worker                                  | Once per worker                                  |
 
 **Why TrueAsync wins on DB-bound load:**
 Swoole keeps the app in memory (avoids bootstrap cost) but PDO is still synchronous —
