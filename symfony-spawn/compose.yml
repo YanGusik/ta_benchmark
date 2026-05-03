@@ -1,14 +1,17 @@
 services:
 
   app:
-    image: trueasync/php-true-async:latest-frankenphp
+    image: trueasync/php-true-async:latest
     working_dir: /app
-    command: php bin/console async:franken --host=0.0.0.0 --port=8080 --workers=15 --buffer=0
+    command: php public/index.php
     ports:
       - "8085:8080"
     volumes:
       - .:/app
+      #- /home/yan/projects/symfony-spawn:/home/yan/projects/symfony-spawn
     environment:
+      APP_RUNTIME: Spawn\Symfony\Runtime\TrueAsyncRuntime
+      APP_RUNTIME_OPTIONS: '{"workers":1}'
       APP_ENV: prod
       APP_DEBUG: "false"
       DB_HOST: db

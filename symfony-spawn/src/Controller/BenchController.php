@@ -8,14 +8,26 @@ use Symfony\Component\Routing\Attribute\Route;
 
 class BenchController
 {
-    public function __construct(private readonly Connection $connection) {}
+    public function __construct(private readonly Connection $connection)
+    {
+    }
 
     #[Route('/hello')]
     public function hello(): JsonResponse
     {
         return new JsonResponse([
             'message' => 'Hello from TrueAsync Symfony!',
-            'time'    => (new \DateTimeImmutable())->format(\DateTimeInterface::ATOM),
+            'time' => (new \DateTimeImmutable())->format(\DateTimeInterface::ATOM),
+        ]);
+    }
+
+    #[Route('/yan')]
+    public function yan(): JsonResponse
+    {
+        return new JsonResponse([
+            'true_async_server' => extension_loaded('true_async_server'),
+            'class_exists' => !class_exists('TrueAsync\HttpServer'),
+            'time' => (new \DateTimeImmutable())->format(\DateTimeInterface::ATOM),
         ]);
     }
 
@@ -25,7 +37,7 @@ class BenchController
         $this->connection->executeQuery('SELECT pg_sleep(0.01)');
 
         return new JsonResponse([
-            'ok'   => true,
+            'ok' => true,
             'time' => (new \DateTimeImmutable())->format(\DateTimeInterface::ATOM),
         ]);
     }
@@ -82,18 +94,18 @@ class BenchController
         );
 
         return new JsonResponse([
-            'user'         => $user['name'],
-            'posts'        => count($posts),
-            'views'        => $stats['total_views'],
-            'top_posts'    => count($topPosts),
-            'leaderboard'  => count($leaderboard),
-            'other_user'   => $otherUser['name'],
-            'other_posts'  => count($otherPosts),
+            'user' => $user['name'],
+            'posts' => count($posts),
+            'views' => $stats['total_views'],
+            'top_posts' => count($topPosts),
+            'leaderboard' => count($leaderboard),
+            'other_user' => $otherUser['name'],
+            'other_posts' => count($otherPosts),
             'recent_views' => count($recentViews),
-            'queries'      => 10,
+            'queries' => 10,
             'memory_usage' => memory_get_usage(),
-            'memory_peak'  => memory_get_peak_usage(),
-            'time'         => (new \DateTimeImmutable())->format(\DateTimeInterface::ATOM),
+            'memory_peak' => memory_get_peak_usage(),
+            'time' => (new \DateTimeImmutable())->format(\DateTimeInterface::ATOM),
         ]);
     }
 
@@ -116,9 +128,9 @@ class BenchController
 
         return new JsonResponse([
             'max_connections' => $limit['max_connections'],
-            'total'           => $total,
-            'by_state'        => $byState,
-            'time'            => (new \DateTimeImmutable())->format(\DateTimeInterface::ATOM),
+            'total' => $total,
+            'by_state' => $byState,
+            'time' => (new \DateTimeImmutable())->format(\DateTimeInterface::ATOM),
         ]);
     }
 }
